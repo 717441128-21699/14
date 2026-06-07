@@ -284,50 +284,125 @@ export const useEmergencyStore = create<EmergencyState>((set, get) => ({
 
   moveAmbulances: () => {
     const state = get();
+    const now = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    const newAlerts: Alert[] = [];
+
+    const updatedAmbulances: Ambulance[] = state.ambulances.map((a) => {
+      if (!a.route || a.routeProgress === undefined) return a;
+      const newProgress = Math.min(a.routeProgress + 0.005, 1);
+      const newPos = interpolatePosition(a.route, newProgress);
+
+      if (newProgress >= 1) {
+        if (a.status === 'dispatch') {
+          return { ...a, status: 'return' as const, routeProgress: 0, route: generateRoute(newPos, { lat: 39.9042, lng: 116.4074, x: 0, z: 0 }), position: newPos, alertActive: false };
+        }
+        if (a.status === 'return') {
+          return { ...a, status: 'standby' as const, routeProgress: undefined, route: undefined, targetPosition: undefined, patient: undefined, position: newPos, alertActive: false };
+        }
+      }
+
+      let newHR = a.patient?.heartRate ?? 75;
+      let newSpO2 = a.patient?.spo2 ?? 98;
+      let alertActive = a.alertActive || false;
+
+      if (a.patient && a.status === 'dispatch') {
+        const rand = Math.random();
+        if (rand < 0.02) {
+          newHR = 55 + Math.random() * 8;
+        } else if (rand < 0.04) {
+          newHR = 115 + Math.random() * 15;
+        } else if (rand < 0.06) {
+          newSpO2 = 85 + Math.random() * 4;
+        } else {
+          newHR = Math.max(60, Math.min(110, newHR + (Math.random() - 0.48) * 3));
+          newSpO2 = Math.max(92, Math.min(100, newSpO2 + (Math.random() - 0.5) * 0.8));
+        }
+
+        newHR = Math.round(newHR);
+        newSpO2 = Math.round(newSpO2);
+
+        const isAbnormal = newHR < 60 || newHR > 110 || newSpO2 < 92;
+        if (isAbnormal && !alertActive) {
+          alertActive = true;
+          if (newHR < 60) {
+            newAlerts.push({
+              id: `alert-${Date.now()}-${a.id}-hr-low`,
+              ambulanceId: a.id,
+              ambulanceNumber: a.number,
+              type: 'heartRate',
+              message: '患者心率异常偏低，紧急关注',
+              value: newHR,
+              timestamp: now,
+              acknowledged: false,
+            });
+          } else if (newHR > 110) {
+            newAlerts.push({
+              id: `alert-${Date.now()}-${a.id}-hr-high`,
+              ambulanceId: a.id,
+              ambulanceNumber: a.number,
+              type: 'heartRate',
+              message: '患者心率异常偏高，需紧急处置',
+              value: newHR,
+              timestamp: now,
+              acknowledged: false,
+            });
+          }
+          if (newSpO2 < 92) {
+            newAlerts.push({
+              id: `alert-${Date.now()}-${a.id}-spo2`,
+              ambulanceId: a.id,
+              ambulanceNumber: a.number,
+              type: 'spo2',
+              message: '患者血氧饱和度显著下降',
+              value: newSpO2,
+              timestamp: now,
+              acknowledged: false,
+            });
+          }
+        } else if (!isAbnormal && alertActive && (newHR >= 65 && newHR <= 105 && newSpO2 >= 95)) {
+          alertActive = false;
+        }
+      }
+
+      const newHistory = a.patient
+        ? [
+            ...(a.patient.history || []).slice(-59),
+            { time: now, heartRate: newHR, spo2: newSpO2 },
+          ]
+        : [];
+
+      return {
+        ...a,
+        position: newPos,
+        routeProgress: newProgress,
+        alertActive,
+        patient: a.patient
+          ? {
+              ...a.patient,
+              heartRate: newHR,
+              spo2: newSpO2,
+              history: newHistory,
+            }
+          : a.patient,
+      };
+    });
+
+    const updatedCalls = state.calls.map((c) => {
+      if (c.status === 'assigned') {
+        const amb = updatedAmbulances.find((a) => a.id === c.assignedAmbulanceId);
+        if (amb && amb.routeProgress && amb.routeProgress > 0.05) {
+          return { ...c, status: 'enroute' as const };
+        }
+      }
+      return c;
+    });
+
+    const mergedAlerts = newAlerts.length > 0 ? [...newAlerts, ...state.alerts].slice(0, 50) : state.alerts;
+
     set({
-      ambulances: state.ambulances.map((a) => {
-        if (!a.route || a.routeProgress === undefined) return a;
-        const newProgress = Math.min(a.routeProgress + 0.005, 1);
-        const newPos = interpolatePosition(a.route, newProgress);
-
-        if (newProgress >= 1) {
-          if (a.status === 'dispatch') {
-            return { ...a, status: 'return', routeProgress: 0, route: generateRoute(newPos, { lat: 39.9042, lng: 116.4074, x: 0, z: 0 }), position: newPos };
-          }
-          if (a.status === 'return') {
-            return { ...a, status: 'standby', routeProgress: undefined, route: undefined, targetPosition: undefined, patient: undefined, position: newPos };
-          }
-        }
-
-        let newHR = a.patient?.heartRate ?? 75;
-        let newSpO2 = a.patient?.spo2 ?? 98;
-        if (a.patient && a.status === 'dispatch') {
-          newHR = Math.max(55, Math.min(130, newHR + (Math.random() - 0.45) * 4));
-          newSpO2 = Math.max(88, Math.min(100, newSpO2 + (Math.random() - 0.5) * 1.5));
-        }
-
-        return {
-          ...a,
-          position: newPos,
-          routeProgress: newProgress,
-          patient: a.patient
-            ? {
-                ...a.patient,
-                heartRate: Math.round(newHR),
-                spo2: Math.round(newSpO2),
-              }
-            : a.patient,
-        };
-      }),
-      calls: state.calls.map((c) => {
-        if (c.status === 'assigned') {
-          const amb = state.ambulances.find((a) => a.id === c.assignedAmbulanceId);
-          if (amb && amb.routeProgress && amb.routeProgress > 0.05) {
-            return { ...c, status: 'enroute' as const };
-          }
-        }
-        return c;
-      }),
+      ambulances: updatedAmbulances,
+      calls: updatedCalls,
+      alerts: mergedAlerts,
     });
   },
 }));
