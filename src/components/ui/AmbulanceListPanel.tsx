@@ -19,10 +19,18 @@ export function AmbulanceCard({ ambulance, selected }: AmbulanceCardProps) {
 
   return (
     <div
+      role="button"
+      tabIndex={0}
       className={`glass-panel p-3 cursor-pointer transition-all duration-200 ${
         selected ? 'glow-border scale-[1.02]' : 'hover:border-tech-cyan/50'
       } ${ambulance.alertActive ? 'border-severity-red animate-pulse' : ''}`}
       onClick={() => setSelectedAmbulance(ambulance.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setSelectedAmbulance(ambulance.id);
+        }
+      }}
     >
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">

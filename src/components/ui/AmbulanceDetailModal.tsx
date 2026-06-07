@@ -7,9 +7,10 @@ import { useEmergencyStore } from '../../store/useEmergencyStore';
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
 export function AmbulanceDetailModal() {
-  const selectedAmbulanceId = useEmergencyStore((s) => s.selectedAmbulanceId);
   const setSelectedAmbulance = useEmergencyStore((s) => s.setSelectedAmbulance);
-  const ambulance = useEmergencyStore((s) => s.ambulances.find((a) => a.id === selectedAmbulanceId));
+  const selectedAmbulanceId = useEmergencyStore((s) => s.selectedAmbulanceId);
+  const ambulances = useEmergencyStore((s) => s.ambulances);
+  const ambulance = ambulances.find((a) => a.id === selectedAmbulanceId);
 
   const chartData = useMemo(() => {
     if (!ambulance?.patient) return null;
